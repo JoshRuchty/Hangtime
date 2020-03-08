@@ -1,3 +1,5 @@
+//1.1
+
 
 //▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
 //Definitions
@@ -39,8 +41,8 @@ CRGB leds[NUM_LEDS];
 
 //Game settings
 long roundLength = 5000; //in milliseconds
-byte numOfRounds = 6;
-long rndExpireTime; // when set by pendingPlayer(), sets the millis time that ends the round
+byte numOfRounds = 2;
+long rndExpireTime = 30000; // when set by pendingPlayer(), sets the millis time that ends the round
 byte numOfPlayers = 2;
 
 //Rfid  info
@@ -56,17 +58,18 @@ bool success = 0;
 
 
 //Misc bg processes etc.
-byte currentRound = 0;
+byte currentRound = 1;
 bool gameOver = 0;
 bool gameIsLive = 0;
 int playerScores[11]; // playerScores[0] = coop group score; playerScores[1]=p1 score; can make this multi-dimensional for roundscores
 //round victor calculated by comparing p
 byte playerTurn = 1;
 int tagDebounce = 200; //used as milliseconds between tagReads before it's recognized
-unsigned long lastTag = 0;
+unsigned long lastTagTime = 0;
 byte timerPos = 0;
 byte hsTimerLum = 0; // 40 or whatever. an independent array on which to do math for the timer
-byte showAllScores [NUM_LEDS][3]; //an array for showing the current scores
+byte pNumJustTagged;
+long currentMillis;
 
 
 //▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
@@ -107,20 +110,46 @@ void setup(void) {
 //▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
 void loop() {
   delay(1000);
-  clearUid();
-  //Serial.print("beforeuid");
+
+  //clear tag variables
+  memset(uid, 0, sizeof(uid)); // clears uid[]
+  success = 0;
+  pNumJustTagged = 0; //This variable holds the player number that just tagged the reader; only calculated once/loop and cleared at the begnning
+
+  //processes
+  currentMillis = millis();
   getUid();
-  //Serial.print("afteruid");
+
+  //Tag events
+  if (success && currentMillis - lastTagTime > tagDebounce) { //what player # just tagged?
+    pNumJustTagged = whoTagged();
+    lastTagTime = currentMillis;
+  }
   printInfo();
 
+  // LIVE gameplay
+  if (!gameIsLive && !gameOver) {
+    if (currentRound <= numOfRounds) {
+      //Serial.println("currentRound <= numOfRounds");
+      //don't need to check the timer
+      waitingPlayer(playerTurn);
+    } else {
+      gameOver = 1;
+    }
+  }
 
   if (gameIsLive) {
     timerCheck();
-    addPlayerPoint();
+    if (playerTurn == pNumJustTagged)
+      addPlayerPoint(playerTurn);
     //showPlayerScores();
     //CountDownLed();
   }
-  pendingPlayer();
+
+if(gameOver){
+  //victor animation
+  //LCD scores
+}
 
 
   // LED display to reflect playerTurn, time left, & all player scores
@@ -136,7 +165,15 @@ void loop() {
 //    FUNCTIONS
 //▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
 
-
+byte whoTagged () {
+  byte x;
+  for (x = 1; x <= numOfPlayers; x++) {
+    if (tagMatch(uid, playerIDs[x])) //when running for loops, make sure no conflicting local variable names are inheritted
+      return x;
+  }
+  Serial.println("player # tagged: ");
+  Serial.println(x);
+}
 
 void touchAnimate() {
   //Serial.println("touchanimate()");
@@ -159,7 +196,7 @@ void touchAnimate() {
 
 void CountDownLed() {
   //Serial.println("countdownled()");
-  long msLeft = rndExpireTime - millis();
+  long msLeft = rndExpireTime - currentMillis;
   timerPos = map (msLeft, 0, roundLength, BASE_LED, NUM_LEDS);
   leds[timerPos] = CRGB:: White;
   leds[timerPos + 1] = CRGB:: White;
@@ -185,49 +222,59 @@ void showPlayerScores() {
 void printInfo() {
   //Serial.println("printInfo() ");
 
-  Serial.print("p1: ");
+  //Serial.print("success=");
+  //Serial.println(success);
+
+  Serial.print("p1:");
   Serial.print(playerScores[1]);
 
-  Serial.print(" p2: ");
+  Serial.print(" p2:");
   Serial.print(playerScores[2]);
 
-  Serial.print(" round: ");
+
+  Serial.print(" round:");
   Serial.print(currentRound);
   Serial.print("/");
   Serial.print(numOfRounds);
 
-  Serial.print(" millis/rndExpireTime(): ");
-  Serial.print(millis());
+
+  Serial.print(" time:");
+  Serial.print(currentMillis);
   Serial.print("/");
   Serial.print(rndExpireTime);
-  if (millis() > rndExpireTime )
-    Serial.print(" true  ");
-  else
-    Serial.print(" false  ");
-
-  Serial.print(" pTurn: ");
+  Serial.print(" pTurn:");
   Serial.print(playerTurn);
+
+  /*Serial.print("LEDS:");
+    Serial.print(leds[20].r);
+    Serial.print(leds[20].g);
+    Serial.print(leds[20].b);
+  */
   Serial.print(" gameIsLive: ");
   Serial.println(gameIsLive);
 }
 
 void timerCheck() {
   //Serial.println("timerCheck()");
-  if (millis() > rndExpireTime) {
+  if (currentMillis > rndExpireTime) {
     gameIsLive = 0;
-    if (currentRound < numOfRounds) {
-      currentRound++;
-      nextPlayer();
-    } else gameOver = 1;
+    nextRound();
   }
 }
 
-void addPlayerPoint() {// function call must be nested in a if (gameIsLive) = 1 statement
+void nextRound() {
+  if (currentRound <= numOfRounds) {
+    currentRound++;
+    nextPlayer();
+  } else gameOver = 1;
+}
+
+
+byte addPlayerPoint(byte x) {
   //Serial.println("addPlayerPoint");
-  if (tagMatch(uid, playerIDs[playerTurn]) && (millis() - lastTag > tagDebounce))
-    playerScores[playerTurn]++;
-    touchAnimate();
-  lastTag = millis();
+  playerScores[x]++;
+  //touchAnimate();
+
   //Serial.println(playerScores[playerTurn]);
   //update LED here
 }
@@ -244,19 +291,25 @@ void assignPlayer(byte slotNum, byte Rfid[]) { //slot 0 reserved for coop game s
   }
 }
 
-void pendingPlayer() {
-  //Serial.println("pendingPlayer()");
-  for (byte i = BASE_LED; i <= NUM_LEDS; i++) {
-    leds[i] = (playerColors[playerTurn][0], playerColors[playerTurn][1], playerColors[playerTurn][2]);
-  }
-  if (currentRound < numOfRounds && gameIsLive == 0 && tagMatch(uid, playerIDs[playerTurn])) { //5 rounds = 6 turns / 2 ps = 3 rounds of 2 ps
-    rndExpireTime = millis() + roundLength;
+void waitingPlayer(byte x) { //x = playerTurn
+  //waitingPlayerLed();
+  if (x == pNumJustTagged) { //5 rounds = 6 turns / 2 ps = 3 rounds of 2 ps
+    rndExpireTime = currentMillis + roundLength;
     gameIsLive = 1;
-    Serial.print("Pending player rndExpireTime: ");
+    Serial.print("correct player Found! round ends at: ");
     Serial.println(rndExpireTime);
 
   }
-} //end pendingPlayer
+}
+
+void waitingPlayerLed() {
+  Serial.println("waitingPlayer()"); //bug after this LINE; code makes it here, but no LED display
+  /*for (byte i = BASE_LED; i <= NUM_LEDS; i++) {
+    leds[i] = (playerColors[playerTurn][0], playerColors[playerTurn][1], playerColors[playerTurn][2]);
+    }*/
+
+  FastLED.show(); // display this frame
+} //end waitingPlayerLed
 
 bool isTurnTag() {
   //Serial.println("isTUrnTag");
@@ -265,7 +318,7 @@ bool isTurnTag() {
   }
 }
 
-bool tagMatch(byte array1[], byte array2[]) {
+bool tagMatch(byte array1[], byte array2[]) { //receives arrays as arguments
   //Serial.println("tagMatch()");
   for (byte i = 0; i < 4; i++) {
     if (array1[i] != array2[i]) {
@@ -280,18 +333,14 @@ bool tagMatch(byte array1[], byte array2[]) {
   }
 }
 
-void clearUid() {
-  //Serial.println("clearUid()");
-  success = 0;
-  for (byte i = 0; i < 7; i++) {
-    uid[i] = 0;
-  }
-}
+
 
 void getUid() {
   //Serial.println("getUid()");
-  bool success = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, &uid[0], &uidLength); // searches for and populates uid[] and uidLength
+  success = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, &uid[0], &uidLength); // searches for and populates uid[] and uidLength
+
 }
+
 void printUid() {
   Serial.println("printUid running");
   for (int x = 0; x < uidLength; x++) { //note uidLength = 0 every round of the loop, so uidLength = 0 until the loop where a card is detected
