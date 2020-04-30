@@ -51,7 +51,6 @@ byte uidLength;                        // Length of the Uid (4 or 7 ints dependi
 byte playerColors [11][3] = {{0, 0, 0}, {255, 0, 0}, {0, 0, 255}}; //player x RGB/HSV value
 
 byte playerIDs [11][4]; // first dimension is player number ([0] = collective score; [1]=player1, etc.) and second dimension is the 4 values for the RFID
-//byte playerIDs[3][4] = {{0, 0, 0, 0}, {60, 166, 231, 11}, {76, 132, 231, 11}};
 byte p1ID[] = {60, 166, 231, 11}; //red tag I think
 byte p2ID[] = {76, 132, 231, 11}; // hard coded for now
 bool success = 0;
@@ -108,32 +107,18 @@ void setup(void) {
 //    Loop
 //▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
 void loop() {
-  delay(1000);
-
+  //delay(1000);
+  currentMillis = millis();
   //clear tag variables
   memset(uid, 0, sizeof(uid)); // clears uid[]
   success = 0;
   pNumJustTagged = 0; //This variable holds the player number that just tagged the reader; only calculated once/loop and cleared at the begnning
 
-  //processes
-  currentMillis = millis();
-  getUid(); // attempts to read a RFID tag; if successful, triggers success = 1 & populates uid
-
   //Tag events
+  getUid(); // attempts to read a RFID tag; if successful, triggers success = 1 & populates uid
   if (success && currentMillis - lastTagTime > tagDebounce) { //what player # just tagged?
     pNumJustTagged = whoTagged();
     lastTagTime = currentMillis;
-  }
-
-  // LIVE gameplay
-  if (gameIsLive) {
-    timerCheck();
-    if (playerTurn == pNumJustTagged) {
-      addPlayerPoint(playerTurn);
-      //addPointAnimate();
-    }
-    //showPlayerScores();
-    //CountDownLed();
   }
 
   //when waiting for player to begin their turn
@@ -141,35 +126,81 @@ void loop() {
     if (currentRound <= numOfRounds) { //assuming rounds aren't over
       waitingPlayerLed(); //this works but for some reason makes p1 score 255 after first round
       waitingPlayer();
-      
     } else { // in which case, gameOver = 1 if all rounds are complete
       gameOver = 1;
     }
   }
 
-  
+  // LIVE gameplay
+  if (gameIsLive) {
+    timerCheck();
+    if (playerTurn == pNumJustTagged) {
+      playerScores[playerTurn]++;
+      //addPlayerPoint(playerTurn); //don't need this, doing it directly above
+      //addPointAnimate();
+    }
+    //showPlayerScores();
+    //CountDownLed();
+  }
 
   if (gameOver) {
     //victor animation
     //LCD scores
   }
-
   // LED display to reflect playerTurn, time left, & all player scores
   //HS stands for High Score Game
-
-
   FastLED.show(); // display this frame
   FastLED.delay(1000 / FRAMES_PER_SECOND);
+  printInfo();
   //Serial.println("//end main loop");
 
-  printInfo();
 } //end main loop
 //▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
 //    FUNCTIONS
 //▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
 
+
+byte whoTagged () {
+  byte x;
+  for (x = 1; x <= numOfPlayers; x++) {
+    if (tagMatch(uid, playerIDs[x])) //when running for loops, make sure no conflicting local variable names are inheritted
+      return x;
+  }
+  Serial.println("player # tagged: ");
+  Serial.println(x);
+}
+
+bool tagMatch(byte array1[], byte array2[]) { //receives arrays as arguments
+  //Serial.println("tagMatch()");
+  for (byte i = 0; i < 4; i++) {
+    if (array1[i] != array2[i]) {
+      //Serial.println("no match");
+      return false;
+    }
+    if (i == 3) { // if we made it to 4 loops for each of the array positions, then all 4 Tag Serial numbers sections are matching
+      //Serial.println("matches");
+      return true;
+    }
+  }
+}
+
+void timerCheck() {
+  //Serial.println("timerCheck()");
+  if (currentMillis > rndExpireTime) {
+    gameIsLive = 0;
+    nextRound();
+  }
+}
+
+void nextRound() {
+  if (currentRound < numOfRounds) {
+    currentRound++;
+    nextPlayer();
+  } else gameOver = 1;
+}
+
 void waitingPlayerLed() {
-    for (byte j = 8; j < 40; j++) {
+  for (byte j = BASE_LED; j < NUM_LEDS; j++) {
     leds[j].r = playerColors[playerTurn][0];
     leds[j].g = playerColors[playerTurn][1];
     leds[j].b = playerColors[playerTurn][2];
@@ -185,26 +216,13 @@ void waitingPlayer() {
     gameIsLive = 1;
     Serial.print("correct player Found! round ends at: ");
     Serial.println(rndExpireTime);
-
   }
 }
 
 void addPointAnimate() {
   Serial.println("addPointAnimate() rolling");
-
 }
 
-
-
-byte whoTagged () {
-  byte x;
-  for (x = 1; x <= numOfPlayers; x++) {
-    if (tagMatch(uid, playerIDs[x])) //when running for loops, make sure no conflicting local variable names are inheritted
-      return x;
-  }
-  Serial.println("player # tagged: ");
-  Serial.println(x);
-}
 
 
 void CountDownLed() {
@@ -233,68 +251,31 @@ void showPlayerScores() {
 }
 
 void printInfo() {
-  //Serial.println("printInfo() ");
-
-  //Serial.print("success=");
-  //Serial.println(success);
-
   Serial.print("p1:");
   Serial.print(playerScores[1]);
-
   Serial.print(" p2:");
   Serial.print(playerScores[2]);
-
-
   Serial.print(" round:");
   Serial.print(currentRound);
   Serial.print("/");
   Serial.print(numOfRounds);
-
-
   Serial.print(" time:");
   Serial.print(currentMillis);
   Serial.print("/");
   Serial.print(rndExpireTime);
   Serial.print(" pTurn:");
   Serial.print(playerTurn);
-
-  /*Serial.print("LEDS:");
-    Serial.print(leds[20].r);
-    Serial.print(leds[20].g);
-    Serial.print(leds[20].b);
-  */
-
   Serial.print(" gameOver:");
   Serial.print(gameOver);
-
-
   Serial.print(" gameIsLive: ");
   Serial.println(gameIsLive);
 }
-
-void timerCheck() {
-  //Serial.println("timerCheck()");
-  if (currentMillis > rndExpireTime) {
-    gameIsLive = 0;
-    nextRound();
-  }
-}
-
-void nextRound() {
-  if (currentRound <= numOfRounds) {
-    currentRound++;
-    nextPlayer();
-  } else gameOver = 1;
-}
-
-
-void addPlayerPoint(byte x) {
+/*void addPlayerPoint(byte x) {
   //Serial.println("addPlayerPoint");
   playerScores[x]++;
-
   //Serial.println(playerScores[playerTurn]);
   //update LED here
-}
+  }*/
 
 void nextPlayer() {
   //Serial.println("nextPlayer()");
@@ -308,25 +289,10 @@ void assignPlayer(byte slotNum, byte Rfid[]) { //slot 0 reserved for coop game s
   }
 }
 
-
 bool isTurnTag() {
   //Serial.println("isTUrnTag");
   if (gameIsLive && tagMatch(uid, playerIDs[playerTurn])) {
     return true;
-  }
-}
-
-bool tagMatch(byte array1[], byte array2[]) { //receives arrays as arguments
-  //Serial.println("tagMatch()");
-  for (byte i = 0; i < 4; i++) {
-    if (array1[i] != array2[i]) {
-      //Serial.println("no match");
-      return false;
-    }
-    if (i == 3) { // if we made it to 4 loops for each of the array positions, then all 4 Tag Serial numbers sections are matching
-      //Serial.println("matches");
-      return true;
-    }
   }
 }
 
